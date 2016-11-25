@@ -1,24 +1,3 @@
-/**
-* \file
-*
-* \brief Empty user application template
-*
-*/
-
-/**
-* \mainpage User Application template doxygen documentation
-*
-* \par Empty user application template
-*
-* Bare minimum empty user application template
-*
-* \par Content
-*
-* -# Include the ASF header files (through asf.h)
-* -# Minimal main function that starts with a call to board_init()
-* -# "Insert application code here" comment
-*
-*/
 
 /*
 * Include header files for all drivers that have been imported from
@@ -27,8 +6,8 @@
 
 
 /*###################################### 
-The Display library is ported from Adafruits ST7735 driver. Some functions from the Adafruit GFX library where added to bring it alive.
-The code for the FFT is inspired by Matthias Busse, but it's mostly based on the Wikipedia.com article.
+* The Display library is ported from Adafruits ST7735 driver. Some functions from the Adafruit GFX library where added to bring it alive.
+* The code for the FFT is inspired by Matthias Busse, but it's mostly based on the Wikipedia.com article.
 #####################################'*/
 
 
@@ -37,21 +16,22 @@ The code for the FFT is inspired by Matthias Busse, but it's mostly based on the
 #include <Adafruit_ST7735.h>
 #include <math.h>
 
-
-uint16_t _width = 128;
-uint16_t _height = 160;
+uint16_t _width = 128;  //LCD Width
+uint16_t _height = 160; //LCD Height
 
 float PI = 3.141592653589;
 
-#define N_WAVE	256    // volle Länge der Sinewave[] möglich 16, 64, 256, 1024 ...
+#define N_WAVE	256    // FFT size. 16, 64, 256, 1024 ...
 #define LOG2_N_WAVE 8  // log2(N_WAVE)
-#define F_SAMPLE 5120  // 5120/128 = 40Hz per FFT "bin"
-#define AMP_CARRIER 100 // amplitude of each "carrier" wave
+//#define F_SAMPLE 5120  // 5120/128 = 40Hz per FFT "bin"
+//#define AMP_CARRIER 100 // amplitude of each "carrier" wave
 
-int im[N_WAVE/2];
-int re[N_WAVE/2];
-Bool old[64][64];
-int Sinewave[N_WAVE/2] = { // 128 Werte, die halbe positive Sinuswelle
+int im[N_WAVE/2];  //complex Array for FFT
+int re[N_WAVE/2];  //real Array for FFT
+
+Bool old[64][64];  //Framebuffer for more efficient Display update
+
+int Sinewave[N_WAVE/2] = { // lookup Table for FFT, half a sinewave
 	0, 3, 6, 9, 12, 15, 18, 21,
 	24, 28, 31, 34, 37, 40, 43, 46,
 	48, 51, 54, 57, 60, 63, 65, 68,
@@ -71,11 +51,11 @@ int Sinewave[N_WAVE/2] = { // 128 Werte, die halbe positive Sinuswelle
 	24, 21, 18, 15, 12, 9, 6, 3,
 };
 
-double freq, phase;    // Frequenz, Phase
+//double freq, phase;    // Frequenz, Phase
 
-#define LED0 AVR32_PIN_PB00
-#define RST AVR32_PIN_PB09
-#define DC AVR32_PIN_PB08
+#define LED0 AVR32_PIN_PB00  //LED 0
+#define RST AVR32_PIN_PB09   //LCD Reset Pin
+#define DC AVR32_PIN_PB08    //LCD Data/Control Pin
 
 
 #ifndef min
@@ -99,14 +79,14 @@ uint16_t counter;
 uint32_t tempVolume;
 uint32_t volume;
 
-#define SPI_EXAMPLE             (&AVR32_SPI)
+#define SPI_LCD             (&AVR32_SPI)
 #define SPI_SLAVECHIP_NUMBER    (0)
 
 spi_options_t my_spi_options={
 	// The SPI channel to set up : Memory is connected to CS1
 	SPI_SLAVECHIP_NUMBER,
 	// Preferred baudrate for the SPI.
-	60000000,
+	48000000,
 	// Number of bits in each character (8 to 16).
 	8,
 	// Delay before first clock pulse after selecting slave (in PBA clock periods).
@@ -123,8 +103,8 @@ spi_options_t my_spi_options={
 	1
 };
 
-// GPIO pins used for SD/MMC interface
-static const gpio_map_t SD_MMC_SPI_GPIO_MAP =
+// GPIO pins used for LCD interface
+static const gpio_map_t LCD_SPI_GPIO_MAP =
 {
 	{AVR32_SPI_SCK_0_0_PIN,  AVR32_SPI_SCK_0_0_FUNCTION },  // SPI Clock.
 	{AVR32_SPI_MISO_0_0_PIN, AVR32_SPI_MISO_0_0_FUNCTION},  // MISO.
@@ -141,14 +121,14 @@ void delay( uint16_t delay ) {
 
 void spi_init_module(void)
 {
-	gpio_enable_module(SD_MMC_SPI_GPIO_MAP,
-	sizeof(SD_MMC_SPI_GPIO_MAP) / sizeof(SD_MMC_SPI_GPIO_MAP[0]));
+	gpio_enable_module(LCD_SPI_GPIO_MAP,
+	sizeof(LCD_SPI_GPIO_MAP) / sizeof(LCD_SPI_GPIO_MAP[0]));
 	//Init SPI module as master
-	spi_initMaster(SPI_EXAMPLE,&my_spi_options);
+	spi_initMaster(SPI_LCD,&my_spi_options);
 	//Setup configuration for chip connected to CS1
-	spi_setupChipReg(SPI_EXAMPLE,&my_spi_options,sysclk_get_pba_hz());
+	spi_setupChipReg(SPI_LCD,&my_spi_options,sysclk_get_pba_hz());
 	//Allow the module to transfer data
-	spi_enable(SPI_EXAMPLE);
+	spi_enable(SPI_LCD);
 }
 
 /*
@@ -190,7 +170,7 @@ void adc_config( void ) {
 	//    0     1   0.5
 	//    1     1   0.1
 	gpio_clr_gpio_pin( AVR32_PIN_PA10 );
-	gpio_clr_gpio_pin( AVR32_PIN_PA09 ); //We use a microphone with a long output level, so we need more amplification
+	gpio_clr_gpio_pin( AVR32_PIN_PA09 ); //We use a microphone with a low output level, so we need more amplification
 	
 	// Wechselspannung (Anhebung um VCC/2)
 	gpio_set_gpio_pin( AVR32_PIN_PA28 );
@@ -227,8 +207,9 @@ void timer_config( void ) {
 	
 	tc_init_waveform( &AVR32_TC, &WAVEFORM_OPT );		// Initialize the timer/counter waveform.
 	
-	// We want: (1/(12MHz/8)) * RC = 1/44kHz , hence RC = (12MHz/8) / 1000/44 = 34 to get an interrupt every 1/44 ms.
-	tc_write_rc( &AVR32_TC, TC_CHANNEL, ( sysclk_get_cpu_hz() / 8 ) / 6800 ); // Set RC value.
+	// Don't think about it, it works and actually made sense at some point...
+	tc_write_rc( &AVR32_TC, TC_CHANNEL, ( sysclk_get_cpu_hz() / 8 ) / 6800 ); 
+	
 	
 	tc_configure_interrupts( &AVR32_TC, TC_CHANNEL, &TC_INTERRUPT );
 	
@@ -245,40 +226,41 @@ uint16_t cursor_x, cursor_y, textcolor;
 uint8_t textsize;
 
 
-inline void spiwrite(uint8_t c)
+inline void spiwrite(uint8_t c) //send single byte via SPI
 {
-	spi_put(SPI_EXAMPLE,c);
-	while(!spi_is_tx_empty(SPI_EXAMPLE)) {}
-	while(!spi_is_tx_ready(SPI_EXAMPLE)) {}
+	spi_put(SPI_LCD,c);
+	while(!spi_is_tx_empty(SPI_LCD)) {}
+	while(!spi_is_tx_ready(SPI_LCD)) {}
 }
 
-void writecommand(uint8_t c)
+void writecommand(uint8_t c) //write command to LCD
 {
 	gpio_clr_gpio_pin(DC);
-	spi_selectChip(SPI_EXAMPLE, SPI_SLAVECHIP_NUMBER);
+	spi_selectChip(SPI_LCD, SPI_SLAVECHIP_NUMBER);
 	spiwrite(c);
-	spi_unselectChip(SPI_EXAMPLE,SPI_SLAVECHIP_NUMBER);
+	spi_unselectChip(SPI_LCD,SPI_SLAVECHIP_NUMBER);
 }
 
-void writedata(uint8_t c)
+void writedata(uint8_t c) //write one byte data to LCD
 {
 	gpio_set_gpio_pin(DC);
-	spi_selectChip(SPI_EXAMPLE, SPI_SLAVECHIP_NUMBER);
+	spi_selectChip(SPI_LCD, SPI_SLAVECHIP_NUMBER);
 	spiwrite(c);
-	spi_unselectChip(SPI_EXAMPLE,SPI_SLAVECHIP_NUMBER);
+	spi_unselectChip(SPI_LCD,SPI_SLAVECHIP_NUMBER);
 }
 
-void writedata16(uint16_t d)
+void writedata16(uint16_t d) //write two byte data to LCD
 {
 	gpio_set_gpio_pin(DC);
-	spi_selectChip(SPI_EXAMPLE, SPI_SLAVECHIP_NUMBER);
+	spi_selectChip(SPI_LCD, SPI_SLAVECHIP_NUMBER);
 	spiwrite(d >> 8);
 	spiwrite(d);
-	spi_unselectChip(SPI_EXAMPLE,SPI_SLAVECHIP_NUMBER);
+	spi_unselectChip(SPI_LCD,SPI_SLAVECHIP_NUMBER);
 }
 
 
-
+//#####################################################################
+//* From Adafruit:
 
 // Rather than a bazillion writecommand() and writedata() calls, screen
 // initialization commands and arguments are organized in these tables
@@ -449,14 +431,12 @@ void commonInit(const uint8_t *cmdList)
 {
 	colstart  = rowstart = 0; // May be overridden in init func
 
-
 	gpio_set_gpio_pin( RST );
 	delay(500);
 	gpio_clr_gpio_pin( RST );
 	delay(500);
 	gpio_set_gpio_pin( RST );
 	delay(500);
-	
 
 	if(cmdList) commandList(cmdList);
 }
@@ -510,13 +490,15 @@ void pushColor(uint16_t color)
 	writedata16(color);
 }
 
+//#######################################################
+//* Some basic GFX functions
+
 void drawPixel(int16_t x, int16_t y, uint16_t color)
 {
 	if ((x < 0) ||(x >= _width) || (y < 0) || (y >= _height)) return;
 	setAddrWindow(x,y,x+1,y+1);
 	writedata16(color);
 }
-
 
 void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color)
 {
@@ -529,7 +511,6 @@ void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color)
 	}
 }
 
-
 void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color)
 {
 	// Rudimentary clipping
@@ -541,9 +522,6 @@ void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color)
 	}
 }
 
-
-
-// fill a rectangle
 void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
 {
 	// rudimentary clipping (drawChar w/big text requires this)
@@ -612,7 +590,6 @@ void setRotation(uint8_t m)
 		_height = ST7735_TFTWIDTH;
 	}
 }
-
 
 void invertDisplay(uint8_t i)
 {
@@ -831,6 +808,7 @@ uint16_t color, uint16_t bg, uint8_t size) {
 	}
 }
 
+//Very simple print funtion, still better than porting & including Print.h
 void print(char characters[], uint16_t x, uint16_t y, uint16_t c, uint16_t bg, uint16_t size) {
 	int i = 0;
 	while (characters[i] != NULL) {
@@ -839,6 +817,8 @@ void print(char characters[], uint16_t x, uint16_t y, uint16_t c, uint16_t bg, u
 	}
 }
 
+//#############################################################
+//* Here starts the FFT magic
 
 inline int FIX_MPY(int a, int b) {
 	int c = ((int)a * (int)b) >> 6; /* shift right one less bit (i.e. 15-1) */
@@ -849,9 +829,9 @@ inline int FIX_MPY(int a, int b) {
 
 int fix_fft(int fr[], int fi[], int m, int inverse){
 	// fix_fft() - Forward / Inverse Fast Fourier Transform.
-	// fr[n],fi[n] Real und Imaginär Teil Felder für Eingabe und Ergebnis
-	// mit 0 <= n < 2**m;
-	// inverse=0 heisst forward transform (FFT), oder =1 für iFFT.
+	// fr[n],fi[n] real & complex input / output arrays
+	// 0 <= n < 2**m;
+	// inverse=0 --> forward transform (FFT), or =1 for iFFT.
 	int mr, nn, i, j, l, k, istep, n, scale, shift;
 	int qr, qi, tr, ti, wr, wi;
 	int idx;
@@ -890,7 +870,7 @@ int fix_fft(int fr[], int fi[], int m, int inverse){
 			}
 			if (shift) ++scale;
 		}
-		else { // nicht invers
+		else { // not inverse
 			shift = 1;
 		}
 		istep = l << 1;
@@ -931,7 +911,7 @@ void print_fft() {
 	int i = 0, j = 0, largest = 0;
 	/*
 	largest = 0;
-	for (i=0; i < 64;i++){ // Die größe Amplitude gint den maximalen Y-Achsenwert
+	for (i=0; i < 64;i++){ // Sort peaks by size
 	re[i] = sqrt(re[i] * re[i] + im[i] * im[i]);
 	if(re[i] > largest) largest = re[i];
 	}
@@ -939,12 +919,12 @@ void print_fft() {
 	//fillRect(0, 0, 128, 80, ST7735_BLACK);
 	
 
-	for(j=40;j >= 0;j--) { // die Grafik ausgeben, mit der höchsten Amplitude anfangan
+	for(j=40;j >= 0;j--) { // draw the Bars on the LCD
 		for(i=0;i < 64;i++) {
 			if((re[i] >= j) && old[i][j] == 0) {
 				old[i][j] = 1;
 				fillRect(16+(i*2), 110-j*2, 2, 2, ST7735_GREEN);
-			} // Wenn die Amplitude dieses Wertes mindesten so gross ist wie die aktuelle, einen * ausgeben
+			} // Draw a green block
 			if (!(re[i] >= j) && old[i][j] == 1){
 				old[i][j] = 0;
 				fillRect(16+(i*2), 110-j*2, 2, 2, ST7735_BLACK);
@@ -964,33 +944,37 @@ interrupt void tc_int_handler( void ) {
 
 	counter++;
 	
-	adc_start( &AVR32_ADC ); // Konvertierung beginnen
-	ad_value = adc_get_value( &AVR32_ADC, 0 ) - (adc_get_value( &AVR32_ADC, 1 ) - 128); // retrieve ADC value, remove adjustable offset (IN2 is connected to 0-10V trimmer)
+	adc_start( &AVR32_ADC ); // start sampling
+	// retrieve ADC value, remove adjustable offset (IN2 is connected to 0-10V trimmer)
+	ad_value = adc_get_value( &AVR32_ADC, 0 ) - (adc_get_value( &AVR32_ADC, 1 ) - 128);
 	
 	/*
 	srand(42);
 	re[counter] = (int)rand()%(AMP_CARRIER*2)-AMP_CARRIER;//(int)(AMP_CARRIER*sin(phase*2.0*PI));
-	phase += freq/F_SAMPLE; // Phase von Welle 1 updaten
+	phase += freq/F_SAMPLE; // update phase of wave 1
 	if(phase >= 1)phase -= 1;
 	*/
-	re[counter] = ad_value * 8;
+
+	re[counter] = ad_value * 8; //input for FFT
 	tempADC = ad_value;
 	
 	if (ad_value < 0) {
 		ad_value = 0;
 	}
 	
-	tempVolume += ad_value * ad_value;
+	tempVolume += ad_value * ad_value; //input for BarGraph
+
 	/*
 	if (counter > 1000) {
 	counter = 0;
 	volume = tempVolume;
 	tempVolume = 0;
 	}*/
-	im[counter] = 0; // Imaginärteil ist immer 0
+
+	im[counter] = 0; // complex array is always null
 	if (counter > N_WAVE/2) {
 		
-		if (tempADC > 0) {
+		if (tempADC > 0) { //draw Bar Graph on LCD
 			fillRect( tempVolume / 256 + 16, 25, 160-tempVolume / 256, 10, ST7735_BLACK);
 			fillRect(15, 25, tempVolume / 256, 10, ST7735_RED);
 		}
@@ -999,15 +983,15 @@ interrupt void tc_int_handler( void ) {
 		tempVolume = 0;
 		counter = 0;
 		phase = 0.0;
-		int i = 0;/*
+		int i = 0;
+		/*
 		for(i = 0; i < 128; i++) {
-		re[i] = (int)(AMP_CARRIER*sin(phase*2.0*PI)); // Welle 1 berechnen
-		phase += freq/F_SAMPLE; // Phase von Welle 1 updaten
+		re[i] = (int)(AMP_CARRIER*sin(phase*2.0*PI)); // simulate waveform
+		phase += freq/F_SAMPLE; // update phase
 		if(phase >= 1)phase -= 1;
 		}*/
-		fix_fft(re,im,7,0); // die FFT der Messwerte berechnen
-		print_fft();
-		freq = 100;
+		fix_fft(re,im,7,0); // run FFT on samples
+		//freq = 100;
 	}
 
 }
@@ -1043,10 +1027,10 @@ int main( void ) {
 	
 	spi_init_module();
 	
-	initR(INITR_BLACKTAB);
-	setRotation(3);
+	initR(INITR_BLACKTAB); //initialize LCD
+	setRotation(3); //landscape mode
 	
-	for (int i = 0; i < 1; i++) {
+	for (int i = 0; i < 2; i++) {
 		gpio_clr_gpio_pin(LED0+2);
 		delay(200);
 		gpio_set_gpio_pin(LED0+2);
@@ -1065,11 +1049,11 @@ int main( void ) {
 	
 	print("Was ist das fuer", 0, 100, ST7735_RED, ST7735_BLACK, 1);
 	print("1 schlechter Wortwitz?!", 0, 110, ST7735_RED, ST7735_BLACK, 1);
-	
-	
+
 	delay(1000);
 	fillScreen(ST7735_BLACK);
-	
+
+	//draw GUI
 	drawFastHLine(15, 112, 128, ST7735_BLUE);
 	drawFastVLine(15, 40, 71, ST7735_BLUE);
 	print("80Hz", 15, 114, ST7735_CYAN, ST7735_BLACK, 1);
@@ -1077,13 +1061,15 @@ int main( void ) {
 	print("60kHz", 120, 114, ST7735_CYAN, ST7735_BLACK, 1);
 	
 	print(">THE< WSISUALIZER", 40, 10, ST7735_WHITE, ST7735_BLACK, 1);
-	
+
+	//enable sampling
 	interrupt_config();
 	
 	timer_config();
 	
 	while(1) {
-		ledBarGraph((volume / 256) >> 2);
+	    //update LED Bar Graph whenever possible
+		ledBarGraph((volume / 256) >> 2); // first and second LSB are noise anyway, they waste LED's
 	}
 }
 
